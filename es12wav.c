@@ -5,6 +5,7 @@
 // ** 1.0  initial test
 // ** 1.2  create output directory
 // ** 1.3  stereo samples fixed
+// ** 1.4  wav output not cpu-endian-dependent
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -78,7 +79,8 @@ int process_file(FILE *infile);
 int read_sampleheaders(FILE *infile);
 int write_wavfile(FILE *infile, char *filename, struct sampleinf *info);
 int write_samples(FILE *infile, FILE *outfile, struct sampleinf *info);
-
+int write_32bit_le(long value, FILE *file);
+int write_16bit_le(short value, FILE *file);
 
 // Code
 
@@ -90,7 +92,7 @@ int main(int argc, char **argv)
 
   if (argc < 3)
   { 
-    fprintf(stderr, "es12wav  v1.3\n");
+    fprintf(stderr, "es12wav  v1.4\n");
     fprintf(stderr, "Usage: es12wav <es1file> <new-directory>\n");
     exit(1);
   }
@@ -318,25 +320,25 @@ int write_wavfile(FILE *infile, char *filename, struct sampleinf *info)
 
   // .WAV header
   fwrite("RIFF", sizeof (char), 4, outfile);
-  fwrite(&totallength, sizeof totallength, 1, outfile);
+  write_32bit_le(totallength, outfile);
   fwrite("WAVE", sizeof (char), 4, outfile);
 
   // fmt chunk
   fmt_headerlen = 16;
   fwrite("fmt ", sizeof (char), 4, outfile);  
-  fwrite(&fmt_headerlen, sizeof fmt_headerlen, 1, outfile);
+  write_32bit_le(fmt_headerlen, outfile);
 
-  fwrite(&tag_sh, sizeof tag_sh, 1, outfile);
-  fwrite(&channels_sh, sizeof channels_sh, 1, outfile);
-  fwrite(&sample_rate, sizeof sample_rate, 1, outfile);
-  fwrite(&data_rate, sizeof data_rate, 1, outfile);
-  fwrite(&blk_algn_sh, sizeof blk_algn_sh, 1, outfile);
-  fwrite(&bits_per_sample_sh, sizeof bits_per_sample_sh, 1, outfile);
+  write_16bit_le(tag_sh, outfile);
+  write_16bit_le(channels_sh, outfile);
+  write_32bit_le(sample_rate, outfile);
+  write_32bit_le(data_rate, outfile);
+  write_16bit_le(blk_algn_sh, outfile);
+  write_16bit_le(bits_per_sample_sh, outfile);
 
   // data chunk
   fwrite("data", sizeof (char), 4, outfile); // data chunk
-  status = fwrite(&samplebytes, sizeof samplebytes, 1, outfile);
-  if (status != 1)
+  status = write_32bit_le(samplebytes, outfile);
+  if (status != 0)
   {
     fclose(outfile);
     return 2;
@@ -401,15 +403,32 @@ int write_samples(FILE *infile, FILE *outfile, struct sampleinf *info)
     // ** Write to file **
     for (sampleno = 0; sampleno < sampleunits; sampleno++)
     {
-      status = fwrite(&outbuf[sampleno], sizeof (short), 1, outfile);
-      if (status != 1)
+      status = write_16bit_le(outbuf[sampleno], outfile);
+      if (status != 0)
         return 2;
       if (stereo) 
-        fwrite(&outbufa[sampleno], sizeof (short), 1, outfile);
+        write_16bit_le(outbufa[sampleno], outfile);
     }
     sampleunits_left -= sampleunits;
   } while (sampleunits_left > 0);
 
   return 0;
+}
+
+
+// Write 32-bit little endian to file. Return 1 if failure, else 0.
+int write_32bit_le(long value, FILE *file)
+{
+  return fputc(value & 255, file) == EOF ||
+         fputc((value >> 8) & 255, file) == EOF ||
+         fputc((value >> 16) & 255, file) == EOF ||
+         fputc((value >> 24) & 255, file) == EOF;
+}
+
+// Write 16-bit little endian to file. Return 1 if failure, else 0.
+int write_16bit_le(short value, FILE *file)
+{
+  return fputc(value & 255, file) == EOF || 
+         fputc((value >> 8) & 255, file) == EOF;
 }
       
